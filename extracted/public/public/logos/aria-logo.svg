@@ -1,0 +1,25 @@
+<svg width="200" height="80" viewBox="0 0 200 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Circular border -->
+  <circle cx="100" cy="40" r="36" stroke="#F58220" stroke-width="3" fill="#ffffff"/>
+  <!-- Inner ring -->
+  <circle cx="100" cy="40" r="33" stroke="#F58220" stroke-width="1" fill="none" opacity="0.4"/>
+  <!-- 5 vertical bars icon (stylized A) -->
+  <g transform="translate(80, 22)">
+    <!-- 1 dark gray bar (leftmost) -->
+    <rect x="0" y="0" width="5" height="20" rx="2.5" fill="#3A3A3A"/>
+    <!-- 4 orange bars -->
+    <rect x="8" y="3" width="5" height="17" rx="2.5" fill="#F58220"/>
+    <rect x="16" y="6" width="5" height="14" rx="2.5" fill="#F58220"/>
+    <rect x="24" y="3" width="5" height="17" rx="2.5" fill="#F58220"/>
+    <rect x="32" y="0" width="5" height="20" rx="2.5" fill="#F58220"/>
+    <!-- Small orange squares at base -->
+    <rect x="14" y="22" width="2" height="2" fill="#F58220"/>
+    <rect x="22" y="22" width="2" height="2" fill="#F58220"/>
+  </g>
+  <!-- English name -->
+  <text x="100" y="58" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" font-weight="900" fill="#3A3A3A" letter-spacing="1">ARIA MACHINE JAM</text>
+  <!-- Divider line -->
+  <line x1="60" y1="62" x2="140" y2="62" stroke="#F58220" stroke-width="0.8"/>
+  <!-- Persian name -->
+  <text x="100" y="72" text-anchor="middle" font-family="Vazirmatn, sans-serif" font-size="7" font-weight="700" fill="#3A3A3A">— آریا ماشین جم —</text>
+</svg>

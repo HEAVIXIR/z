@@ -1,0 +1,2449 @@
+// HEAVIX — Industrial heavy-machinery marketplace
+// PostgreSQL production schema (migrated from SQLite per ADR-001)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ════════════════════════════════════════════════════════════
+// BRAND CATALOG OS
+// ════════════════════════════════════════════════════════════
+
+model Brand {
+  id          String    @id @default(cuid())
+  name        String
+  nameEn      String?
+  shortName   String?
+  slug        String    @unique
+  logoUrl     String?
+  website     String?
+  country     String?
+  description String?
+  featured    Boolean   @default(false)
+  active      Boolean   @default(true)
+  status      String    @default("ACTIVE")
+  type        String?
+  verification String   @default("UNVERIFIED")
+  parentBrandId String?
+  parentBrand   Brand?    @relation("BrandParent", fields: [parentBrandId], references: [id], onDelete: SetNull)
+  childBrands   Brand[]   @relation("BrandParent")
+  brandFamilyId String?
+  brandFamily   BrandFamily? @relation(fields: [brandFamilyId], references: [id], onDelete: SetNull)
+  priceObservations PriceObservation[]
+  manufacturer  String?
+  foundedYear   Int?
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  categories  BrandCategory[]
+  domains     BrandDomain[]
+  media       BrandMedia[]
+  seo         BrandSEO?
+  display     BrandDisplay?
+  models      ProductModel[]
+  products    Product[]
+  listings    Listing[]
+  aliases     BrandAlias[]
+  industries  BrandIndustry[]
+}
+
+model BrandAlias {
+  id              String  @id @default(cuid())
+  brandId         String
+  brand           Brand   @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  value           String
+  normalizedValue String
+  language        String  @default("fa")
+  type            String  @default("COMMON")
+  confidence      Int     @default(80)
+  createdAt       DateTime @default(now())
+  @@unique([brandId, normalizedValue])
+  @@index([normalizedValue])
+}
+
+model BrandFamily {
+  id          String  @id @default(cuid())
+  name        String
+  nameEn      String?
+  slug        String  @unique
+  description String?
+  logoUrl     String?
+  website     String?
+  country     String?
+  sortOrder   Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  brands      Brand[]
+}
+
+model BrandIndustry {
+  id        String  @id @default(cuid())
+  brandId   String
+  brand     Brand   @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  industry  String
+  @@unique([brandId, industry])
+  @@index([industry])
+}
+
+model Industry {
+  id        String  @id @default(cuid())
+  key       String  @unique
+  nameFa    String
+  nameEn    String?
+  sortOrder Int     @default(0)
+  active    Boolean @default(true)
+  createdAt DateTime @default(now())
+}
+
+model BrandCategory {
+  id        String  @id @default(cuid())
+  brandId   String
+  brand     Brand   @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  categoryId String
+  category  Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  @@unique([brandId, categoryId])
+}
+
+model BrandDomain {
+  id        String  @id @default(cuid())
+  brandId   String
+  brand     Brand   @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  domain    String  // MACHINE | VEHICLE | PART | ATTACHMENT | SERVICE | RENTAL | TRANSPORT | MINERAL | MATERIAL | INDUSTRIAL_EQUIPMENT | AGRICULTURE | TRADING | AUCTION | REQUEST | KNOWLEDGE | GENERAL
+  @@unique([brandId, domain])
+}
+
+model BrandMedia {
+  id        String  @id @default(cuid())
+  brandId   String
+  brand     Brand   @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  type      String  // LOGO | BANNER | GALLERY | VIDEO
+  url       String
+  title     String?
+  sortOrder Int     @default(0)
+}
+
+model BrandSEO {
+  id             String  @id @default(cuid())
+  brandId        String  @unique
+  brand          Brand   @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  metaTitle      String?
+  metaDescription String?
+  keywords       String?
+  ogImage        String?
+}
+
+model BrandDisplay {
+  id              String  @id @default(cuid())
+  brandId         String  @unique
+  brand           Brand   @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  showOnHomepage  Boolean @default(true)
+  showInFooter    Boolean @default(false)
+  accentColor     String?
+  displayOrder    Int     @default(0)
+}
+
+// ════════════════════════════════════════════════════════════
+// TAXONOMY — Category tree + Dynamic Attributes
+// ════════════════════════════════════════════════════════════
+
+model Category {
+  id          String     @id @default(cuid())
+  parentId    String?
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Category[] @relation("CategoryTree")
+  name        String
+  nameEn      String?
+  slug        String     @unique
+  icon        String?
+  imageUrl    String?
+  description String?
+  domain      String?    // MACHINE | VEHICLE | PART | ...
+  // HBR Taxonomy V1.1: layer separates real catalog categories from marketplace verticals
+  layer       String     @default("CATALOG") // CATALOG | MARKETPLACE | SERVICE | FALLBACK
+  // materialized path for fast tree queries (e.g. "machinery.excavators.chain")
+  taxPath     String?
+  featured    Boolean    @default(false)
+  active      Boolean    @default(true)
+  showOnHome  Boolean    @default(true)
+  sortOrder   Int        @default(0)
+  level       Int        @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  // relations
+  listings    Listing[]
+  attributes  CategoryAttribute[]
+  brands      BrandCategory[]
+  modelCategories ModelCategory[]
+  models      ProductModel[]
+  products    Product[]
+  appIndustries CategoryApplicationIndustry[]
+  priceObservations PriceObservation[]
+}
+
+// HBR Taxonomy V1.1 §18: Transaction Layer (separate from Category)
+model TransactionType {
+  id          String   @id @default(cuid())
+  key         String   @unique // SALE | RENT | WANTED | QUOTE | AUCTION | SERVICE_REQUEST
+  nameFa      String
+  nameEn      String?
+  description String?
+  icon        String?
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  listings    Listing[]
+}
+
+// HBR Taxonomy V1.1 §19: Service Layer (separate from Category)
+model ServiceType {
+  id          String   @id @default(cuid())
+  key         String   @unique // INSPECTION | REPAIR | MAINTENANCE | TRANSPORT | CONSULTING | VALUATION | INSTALLATION | TRAINING | OTHER
+  nameFa      String
+  nameEn      String?
+  description String?
+  icon        String?
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+}
+
+// FIX-SERVICES-KNOWLEDGE-CATS-BRANDS (Part 3): homepage Services section.
+// Rich, admin-managed catalog of HEAVIX services (10+ rows). Drives the
+// public homepage "خدمات هویکس" section + /admin/services CRUD page.
+model Service {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  nameFa      String
+  nameEn      String?
+  description String?
+  icon        String?  // emoji or lucide icon name
+  imageUrl    String?
+  sortOrder   Int      @default(0)
+  active      Boolean  @default(true)
+  featured    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// FIX-SERVICES-KNOWLEDGE-CATS-BRANDS (Part 5): admin config for which
+// category generation (L1 or L2) the homepage MachineCategoriesSection
+// renders, and which L1 parent's L2 children to show when generation=2.
+model HomeCategoryConfig {
+  id                  String   @id @default("main")
+  homeCategoryGeneration Int   @default(1) // 1 = L1 children of machinery root, 2 = L2 children of selected L1
+  homeCategoryParentId String? // when generation=2, the L1 parent whose L2 children we show
+  updatedAt           DateTime @updatedAt
+}
+
+// HBR Taxonomy V1.1 §17: Application Industry (16 domains — different from Brand Industry's 39)
+// Brand Industry = what a brand makes; Application Industry = where a machine is used
+model ApplicationIndustry {
+  id        String  @id @default(cuid())
+  key       String  @unique // MINING | ROAD_CONSTRUCTION | CONSTRUCTION | CIVIL | OIL_GAS | PETROCHEMICAL | STEEL | CEMENT | POWER | PORT_MARINE | AGRICULTURE | FORESTRY | RECYCLING | FACTORY | TRANSPORT | OTHER
+  nameFa    String
+  nameEn    String?
+  icon      String?
+  sortOrder Int     @default(0)
+  active    Boolean @default(true)
+  createdAt DateTime @default(now())
+  categories CategoryApplicationIndustry[]
+}
+
+model CategoryApplicationIndustry {
+  id        String  @id @default(cuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  applicationIndustryId String
+  applicationIndustry   ApplicationIndustry @relation(fields: [applicationIndustryId], references: [id], onDelete: Cascade)
+  @@unique([categoryId, applicationIndustryId])
+}
+
+// HBR Taxonomy V1.1 §23: Location as independent dimension
+model Country {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  nameEn    String?
+  code      String? @unique // IR, US, ...
+  phoneCode String?
+  sortOrder Int     @default(0)
+  createdAt DateTime @default(now())
+  provinces Province[]
+  listings  Listing[]
+}
+
+model Province {
+  id        String  @id @default(cuid())
+  countryId String
+  country   Country @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  name      String
+  nameEn    String?
+  code      String?
+  sortOrder Int     @default(0)
+  createdAt DateTime @default(now())
+  cities    City[]
+  listings  Listing[] @relation("ListingProvince")
+  @@unique([countryId, name])
+}
+
+model City {
+  id         String  @id @default(cuid())
+  provinceId String
+  province   Province @relation(fields: [provinceId], references: [id], onDelete: Cascade)
+  name       String
+  nameEn     String?
+  latitude   Float?
+  longitude  Float?
+  sortOrder  Int     @default(0)
+  createdAt  DateTime @default(now())
+  listings   Listing[] @relation("ListingCity")
+  branches   CompanyBranch[]
+  @@unique([provinceId, name])
+}
+
+model AttributeDefinition {
+  id          String   @id @default(cuid())
+  key         String?  @unique // machine-readable key e.g. "operating_weight"
+  name        String   // Persian label (legacy compat)
+  nameEn      String?
+  labelFa     String?  // explicit Persian label (falls back to name)
+  labelEn     String?
+  type        String   // TEXT | LONG_TEXT | INTEGER | DECIMAL | BOOLEAN | SELECT | MULTI_SELECT | RANGE | YEAR | DATE | DATETIME | CURRENCY | UNIT | REFERENCE | LOCATION | FILE | IMAGE | COLOR | SIZE | WEIGHT | URL | PHONE
+  unit        String?
+  required    Boolean  @default(false)
+  filterable  Boolean  @default(false)
+  searchable  Boolean  @default(false)
+  sortable    Boolean  @default(false)
+  visibleOnCard   Boolean @default(false)
+  visibleOnDetail Boolean @default(true)
+  seoRelevant Boolean  @default(false)
+  aiRelevant  Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+  options     AttributeOption[]
+  categories  CategoryAttribute[]
+  values      ListingAttributeValue[]
+}
+
+model AttributeOption {
+  id          String   @id @default(cuid())
+  attributeId String
+  attribute   AttributeDefinition @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  value       String
+  label       String?
+  sortOrder   Int      @default(0)
+}
+
+model CategoryAttribute {
+  id          String   @id @default(cuid())
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  attributeId String
+  attribute   AttributeDefinition @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  required    Boolean  @default(false)
+  filterable  Boolean  @default(false)
+  searchable  Boolean  @default(false)
+  sortable    Boolean  @default(false)
+  displayOrder Int     @default(0)
+  @@unique([categoryId, attributeId])
+}
+
+// HBR Attribute Catalog V1.0 §60-§61: every attribute value carries provenance
+model ListingAttributeValue {
+  id          String   @id @default(cuid())
+  listingId   String
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  attributeId String
+  attribute   AttributeDefinition @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  textValue    String?
+  numberValue  Float?
+  booleanValue Boolean?
+  dateValue    DateTime?
+  optionId     String?
+  unit         String?
+  // Provenance (§60-§61)
+  sourceType   String? // SELLER_INPUT | MANUFACTURER_DOCUMENT | AI_EXTRACTION | AI_INFERENCE | ADMIN_VERIFIED | IMPORTED
+  confidence   Float?  // 0..1
+  sourceReference String?
+  verifiedAt   DateTime?
+  verifiedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@unique([listingId, attributeId])
+  @@index([attributeId])
+}
+
+// ════════════════════════════════════════════════════════════
+// PRODUCT MODELS + GENERATIONS
+// ════════════════════════════════════════════════════════════
+
+model ProductModel {
+  id            String         @id @default(cuid())
+  brandId       String
+  brand         Brand          @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  name          String
+  nameEn        String?
+  slug          String
+  description   String?
+  categoryId    String?
+  category      Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  status        String         @default("ACTIVE")
+  sortOrder     Int            @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  modelCategories ModelCategory[]
+  generations   Generation[]
+  listings      Listing[]
+  products      Product[]
+  @@unique([brandId, slug])
+}
+
+model ModelCategory {
+  id        String  @id @default(cuid())
+  modelId   String
+  model     ProductModel @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  categoryId String
+  category  Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  @@unique([modelId, categoryId])
+}
+
+model Generation {
+  id          String       @id @default(cuid())
+  modelId     String
+  model       ProductModel @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  name        String
+  nameEn      String?
+  slug        String
+  description String?
+  yearFrom    Int?
+  yearTo      Int?
+  status      String       @default("ACTIVE")
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  @@unique([modelId, slug])
+}
+
+// ════════════════════════════════════════════════════════════
+// LISTINGS
+// ════════════════════════════════════════════════════════════
+
+model Listing {
+  id           String         @id @default(cuid())
+  slug         String         @unique
+  title        String
+  description  String?
+  shortDesc    String?
+  price        BigInt?
+  priceType    String         @default("NEGOTIABLE")
+  listingType  String         @default("SALE")
+  condition    String?
+  province     String?
+  city         String?
+  year         Int?
+  workingHours Int?
+  status       String         @default("PUBLISHED")
+  featured     Boolean        @default(false)
+  verified     Boolean        @default(false)
+  showInLatest Boolean        @default(true)
+  viewCount    Int            @default(0)
+  favoriteCount Int           @default(0)
+  publishedAt  DateTime?
+  expiresAt    DateTime?
+  soldAt       DateTime?
+  sellerPhone  String?
+  sellerName   String?
+  sourceUrl    String?
+  sourceSite   String?
+  adminNotes   String?
+  // P2-5b — Rental fields (additive; null for non-RENT listings).
+  rentalPeriod          String?   // HOURLY | DAILY | WEEKLY | MONTHLY | PROJECT
+  deposit               BigInt?
+  minimumRentalPeriod   Int?      // in units of rentalPeriod (e.g. 3 days)
+  operatorIncluded      Boolean   @default(false)
+  fuelIncluded          Boolean   @default(false)
+  transportIncluded     Boolean   @default(false)
+  availabilityStart     DateTime?
+  availabilityEnd       DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  brandId      String?
+  brand        Brand?         @relation(fields: [brandId], references: [id])
+  categoryId   String?
+  category     Category?      @relation(fields: [categoryId], references: [id])
+  modelId      String?
+  model        ProductModel?  @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  sellerId     String?
+  seller       User?          @relation("UserListings", fields: [sellerId], references: [id], onDelete: SetNull)
+  companyId    String?
+  company      Company?       @relation("CompanyListings", fields: [companyId], references: [id], onDelete: SetNull)
+  // P1-5/6 — Canonical Location + Transaction normalization (additive; legacy string fields kept)
+  productId        String?
+  product          Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
+  transactionTypeId String?
+  transactionType   TransactionType? @relation(fields: [transactionTypeId], references: [id], onDelete: SetNull)
+  countryId      String?
+  country        Country?  @relation(fields: [countryId], references: [id], onDelete: SetNull)
+  provinceId     String?
+  provinceRel    Province? @relation("ListingProvince", fields: [provinceId], references: [id], onDelete: SetNull)
+  cityId         String?
+  cityRel        City?     @relation("ListingCity", fields: [cityId], references: [id], onDelete: SetNull)
+  // relations
+  images       ListingImage[]
+  favorites    Favorite[]
+  leads        Lead[]
+  offers       ListingOffer[]
+  rejections   ListingRejection[]
+  dealRooms    DealRoom[]
+  inspections  Inspection[]
+  transportRequests TransportRequest[]
+  auctions     Auction[]
+  passport     MachinePassport?
+  attributeValues ListingAttributeValue[]
+  socialReels   SocialReel[]
+  machines     Machine[]
+  priceRecords PriceRecord[]
+  // P2-PRICE-ENGINE — HEAVIX Price Estimation Engine (additive)
+  priceObservations PriceObservation[]
+  priceEstimates    PriceEstimate[]
+  priceOverrides    PriceOverride[]
+  // P2-24 — Recommendation Engine (additive)
+  recommendations UserRecommendation[] @relation("ListingRecommendations")
+  // COMPARE-ENGINE — Comparison items referencing this listing
+  comparisonItems ComparisonItem[]
+  // P1-MESSAGING — Conversations tied to this listing (optional)
+  conversations Conversation[]
+  // P1-ANALYTICS-MODERATION-ALERTS — moderation logs (AI scans + human review)
+  moderationLogs ModerationLog[]
+  // REVIEW-01 — reviews anchored to this listing
+  reviews        Review[]
+  deals          Deal[]
+}
+
+model ListingImage {
+  id        String   @id @default(cuid())
+  listingId String
+  url       String
+  alt       String?
+  isPrimary Boolean  @default(false)
+  sortOrder Int      @default(0)
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+}
+
+// ════════════════════════════════════════════════════════════
+// BUY REQUESTS (HEAVIX Wanted)
+// ════════════════════════════════════════════════════════════
+
+model BuyRequest {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  category    String?
+  brandPref   String?
+  transaction String   @default("SALE")
+  budgetMin   BigInt?
+  budgetMax   BigInt?
+  city        String?
+  province    String?
+  deadline    String?
+  status      String   @default("ACTIVE")
+  verified    Boolean  @default(false)
+  viewCount   Int      @default(0)
+  requesterName  String?
+  requesterPhone String?
+  adminNotes  String?
+  publishedAt DateTime? @default(now())
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  userId      String?
+  user        User?     @relation("UserRequests", fields: [userId], references: [id], onDelete: SetNull)
+}
+
+// ════════════════════════════════════════════════════════════
+// SAVED SEARCH + ALERTS
+// ════════════════════════════════════════════════════════════
+
+model SavedSearch {
+  id          String   @id @default(cuid())
+  name        String
+  query       String?
+  categorySlug String?
+  brandSlug   String?
+  minPrice    BigInt?
+  maxPrice    BigInt?
+  condition   String?
+  city        String?
+  notifyEmail Boolean  @default(true)
+  notifyPush  Boolean  @default(false)
+  lastNotifiedAt DateTime?
+  matchCount  Int      @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  userId      String?
+  user        User?    @relation("UserSavedSearches", fields: [userId], references: [id], onDelete: SetNull)
+}
+
+// ════════════════════════════════════════════════════════════
+// WISHLIST / FAVORITES
+// ════════════════════════════════════════════════════════════
+
+model Favorite {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  userId    String?
+  user      User?    @relation("UserFavorites", fields: [userId], references: [id], onDelete: SetNull)
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  @@unique([userId, listingId])
+}
+
+// ════════════════════════════════════════════════════════════
+// LEADS
+// ════════════════════════════════════════════════════════════
+
+model Lead {
+  id          String   @id @default(cuid())
+  listingId   String
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  leadType    String
+  viewerPhone String?
+  viewerName  String?
+  note        String?
+  createdAt   DateTime @default(now())
+}
+
+// ════════════════════════════════════════════════════════════
+// KNOWLEDGE / ARTICLES
+// ════════════════════════════════════════════════════════════
+
+model Article {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  excerpt     String?
+  content     String
+  category    String   @default("GUIDE")
+  tags        String?
+  coverImage  String?
+  status      String   @default("PUBLISHED")
+  viewCount   Int      @default(0)
+  publishedAt DateTime? @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  authorId    String?
+  author      User?    @relation("UserArticles", fields: [authorId], references: [id], onDelete: SetNull)
+}
+
+// ════════════════════════════════════════════════════════════
+// FOLLOW BRAND / CATEGORY
+// ════════════════════════════════════════════════════════════
+
+model Follow {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation("UserFollows", fields: [userId], references: [id], onDelete: Cascade)
+  followType  String
+  targetId    String
+  createdAt   DateTime @default(now())
+  @@unique([userId, followType, targetId])
+}
+
+// ════════════════════════════════════════════════════════════
+// HOT SEARCH
+// ════════════════════════════════════════════════════════════
+
+model HotSearch {
+  id        String   @id @default(cuid())
+  term      String
+  link      String?
+  count     Int      @default(0)
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+// ════════════════════════════════════════════════════════════
+// SITE WIDGETS
+// ════════════════════════════════════════════════════════════
+
+model SiteWidget {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  title     String
+  content   String
+  active    Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}
+
+// ════════════════════════════════════════════════════════════
+// AI KNOWLEDGE BASE (Priority #58, #59, #60)
+// Machine specs with source of truth + verification status.
+// ════════════════════════════════════════════════════════════
+
+model KnowledgeEntry {
+  id            String   @id @default(cuid())
+  entityType    String   // BRAND | MODEL | MACHINE | CATEGORY | ATTRIBUTE
+  entityId      String   // reference to the entity
+  title         String
+  key           String   // e.g. "engine_power", "weight", "bucket_capacity"
+  value         String   // the actual value
+  unit          String?  // e.g. "kW", "ton", "m³"
+  // Source of Truth (Priority #60)
+  source        String   @default("HEAVIX") // MANUFACTURER | SELLER | HEAVIX | USER | AI | EXTERNAL
+  sourceUrl     String?
+  sourceRef     String?  // reference like "catalog page 42"
+  // Verification Status (Priority #59)
+  verified      Boolean  @default(false)
+  verifiedBy    String?
+  verifiedAt    DateTime?
+  // AI suggested values are marked separately
+  aiSuggested   Boolean  @default(false)
+  // metadata
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@unique([entityType, entityId, key])
+}
+
+// ════════════════════════════════════════════════════════════
+// AI GATEWAY LOG (Priority #54, #56)
+// Central log of all AI tasks — routing, cost, latency, results.
+// ════════════════════════════════════════════════════════════
+
+model AIGatewayLog {
+  id          String   @id @default(cuid())
+  taskType    String   // SEARCH | LISTING_BUILDER | PRICE_ANALYSIS | MARKET_ANALYST | SELLER_ASSISTANT | SCRAPER | MODERATION
+  model       String   // which AI model was used
+  input       String?  // truncated input
+  output      String?  // truncated output
+  latencyMs   Int?
+  tokensUsed  Int?
+  cost        Float?   // estimated cost in USD
+  success     Boolean  @default(true)
+  error       String?
+  userId      String?
+  createdAt   DateTime @default(now())
+  @@index([taskType])
+  @@index([userId, taskType, createdAt])
+}
+
+// ════════════════════════════════════════════════════════════
+// AI BUDGET (singleton) — P0-7 AI Gateway
+// HEAVIX-SECURITY-BASELINE-V1.md §8
+// HEAVIX-P0-IMPLEMENTATION-PLAN.md STEP 7
+//
+// Singleton row (id="main") tracking daily/monthly USD spend caps
+// across ALL AI tasks. Counters auto-reset when their window elapses.
+// ════════════════════════════════════════════════════════════
+
+model AIBudget {
+  // Singleton — always id="main". @default("main") + @id enforce a
+  // single row (any second insert would collide on the PK).
+  id              String    @id @default("main")
+  dailyLimitUsd   Float     @default(10.0)
+  monthlyLimitUsd Float     @default(200.0)
+  dailySpendUsd   Float     @default(0.0)
+  monthlySpendUsd Float     @default(0.0)
+  dailyResetAt    DateTime?
+  monthlyResetAt  DateTime?
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// ════════════════════════════════════════════════════════════
+// AI TASK POLICY — P0-7 AI Gateway
+// Per-task allow-list policy: auth + quota + size + model + timeout
+// + cost ceiling. Enforced by src/lib/ai-policy.ts BEFORE any LLM
+// call in /api/ai-gateway. Deny-by-default: tasks without an active
+// policy row are rejected.
+// ════════════════════════════════════════════════════════════
+
+model AITaskPolicy {
+  id              String   @id @default(cuid())
+  taskType        String   @unique // SEARCH | LISTING_BUILDER | PRICE_ANALYSIS | MARKET_ANALYST | SELLER_ASSISTANT | SCRAPER | MODERATION | SEMANTIC_SEARCH
+  allowedRoles    String   // comma-separated: "ADMIN,SELLER,BUYER" or "*"
+  hourlyLimit     Int      @default(30)
+  dailyLimit      Int      @default(100)
+  maxInputChars   Int      @default(5000)
+  maxOutputTokens Int      @default(2000)
+  model           String   @default("default")
+  timeoutMs       Int      @default(30000)
+  costCeilingUsd  Float    @default(0.05)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ════════════════════════════════════════════════════════════
+// LAUNCH PHASE TRACKER (Priority #65)
+// Track progress through launch phases.
+// ════════════════════════════════════════════════════════════
+
+model LaunchPhase {
+  id          String   @id @default(cuid())
+  phase       Int      @unique // 1-7
+  title       String
+  description String?
+  targetValue Int      // e.g. 100 sellers, 1000 listings
+  currentValue Int     @default(0)
+  status      String   @default("PENDING") // PENDING | ACTIVE | COMPLETED
+  startDate   DateTime?
+  endDate     DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ════════════════════════════════════════════════════════════
+// DEMAND SIGNAL (Supplement #8, #9)
+// Track searches that return zero results — convert to demand data.
+// ════════════════════════════════════════════════════════════
+
+model DemandSignal {
+  id          String   @id @default(cuid())
+  query       String
+  category    String?
+  brand       String?
+  city        String?
+  resultCount Int      @default(0)
+  intent      String?  // BUY | RENT | COMPARE | RESEARCH | PARTS | SERVICE
+  convertedToRequest Boolean @default(false)
+  createdAt   DateTime @default(now())
+  @@index([query])
+}
+
+// ════════════════════════════════════════════════════════════
+// RFQ — Request For Quote (Supplement #18, #19)
+// Structured B2B procurement request with quantity, specs, terms.
+// ════════════════════════════════════════════════════════════
+
+model RFQ {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  // requirements
+  machineType String?
+  brandPref   String?
+  quantity    Int      @default(1)
+  specJson    String?  // JSON: { weight, power, year, etc. }
+  // commercial
+  budgetMin   BigInt?
+  budgetMax   BigInt?
+  location    String?
+  deadline    DateTime?
+  terms       String?  // payment terms, delivery, etc.
+  // status
+  status      String   @default("OPEN") // OPEN | QUOTING | AWARDED | CLOSED | CANCELLED
+  // buyer
+  buyerName   String?
+  buyerPhone  String
+  buyerEmail  String?
+  buyerId     String?
+  buyer       User?    @relation("UserRFQs", fields: [buyerId], references: [id], onDelete: SetNull)
+  // admin
+  adminNotes  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  quotes      RFQQuote[]
+  @@index([status])
+}
+
+model RFQQuote {
+  id          String   @id @default(cuid())
+  rfqId       String
+  rfq         RFQ      @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  // seller
+  sellerName  String
+  sellerPhone String
+  sellerEmail String?
+  sellerId    String?
+  seller      User?    @relation("UserRFQQuotes", fields: [sellerId], references: [id], onDelete: SetNull)
+  // quote
+  unitPrice   BigInt
+  totalPrice  BigInt
+  deliveryTime String?
+  notes       String?
+  status      String   @default("PENDING") // PENDING | ACCEPTED | REJECTED | COUNTERED
+  createdAt   DateTime @default(now())
+  @@index([rfqId])
+}
+
+// ════════════════════════════════════════════════════════════
+// AUCTION ENGINE (Supplement #21)
+// Full auction system with bid rules, inspection, settlement.
+// ════════════════════════════════════════════════════════════
+
+model Auction {
+  id            String    @id @default(cuid())
+  listingId     String
+  listing       Listing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  title         String
+  description   String?
+  // auction config
+  startPrice    BigInt
+  reservePrice  BigInt?
+  minIncrement  BigInt
+  startDate     DateTime
+  endDate       DateTime
+  // status
+  status        String    @default("SCHEDULED") // SCHEDULED | LIVE | ENDED | CANCELLED
+  winnerId      String?
+  winnerName    String?
+  winningBid    BigInt?
+  // inspection
+  inspectionReport String?
+  // admin
+  adminNotes    String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  bids          AuctionBid[]
+  @@index([status])
+}
+
+model AuctionBid {
+  id          String   @id @default(cuid())
+  auctionId   String
+  auction     Auction  @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  bidderName  String
+  bidderPhone String
+  bidderId    String?
+  bidder      User?    @relation("UserAuctionBids", fields: [bidderId], references: [id], onDelete: SetNull)
+  amount      BigInt
+  isWinning   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  @@index([auctionId])
+}
+
+// ════════════════════════════════════════════════════════════
+// INDUSTRIAL PERSIAN DICTIONARY (Supplement #44, #45, #46)
+// Synonym/alias mapping for search — بیل = بیل مکانیکی = اکسکاواتور = excavator
+// ════════════════════════════════════════════════════════════
+
+model IndustrialTerm {
+  id          String   @id @default(cuid())
+  canonical   String   // canonical term, e.g. "بیل مکانیکی"
+  entityType  String?  // MACHINE | BRAND | MODEL | PART | CATEGORY
+  entityId    String?  // reference to entity
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  aliases     TermAlias[]
+}
+
+model TermAlias {
+  id          String   @id @default(cuid())
+  termId      String
+  term        IndustrialTerm @relation(fields: [termId], references: [id], onDelete: Cascade)
+  alias       String   // e.g. "اکسکاواتور", "excavator", "حفار"
+  aliasType   String   @default("SYNONYM") // SYNONYM | COMMON_NAME | ENGLISH | ABBREVIATION | MISSPELLING
+  @@unique([termId, alias])
+}
+
+// ════════════════════════════════════════════════════════════
+// FEATURE FLAGS (Supplement #83)
+// Admin-toggleable features for canary deployment + governance.
+// ════════════════════════════════════════════════════════════
+
+model FeatureFlag {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g. ENABLE_AI_SEARCH, ENABLE_RFQ, ENABLE_AUCTION
+  label       String
+  description String?
+  enabled     Boolean  @default(true)
+  rolloutPct  Int      @default(100) // percentage of users (0-100)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ════════════════════════════════════════════════════════════
+// COMPANY CLAIM (Supplement #11)
+// Allow companies to claim unverified company pages.
+// ════════════════════════════════════════════════════════════
+
+model CompanyClaim {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?    @relation("UserCompanyClaims", fields: [userId], references: [id], onDelete: SetNull)
+  claimantName String
+  claimantPhone String
+  claimantEmail String?
+  claimantRole String? // CEO | MANAGER | OWNER | REPRESENTATIVE
+  evidence    String?  // description of evidence provided
+  status      String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  adminNotes  String?
+  createdAt   DateTime @default(now())
+  reviewedAt  DateTime?
+}
+
+// ════════════════════════════════════════════════════════════
+// LISTING OFFERS / BIDDING
+// ════════════════════════════════════════════════════════════
+
+model ListingOffer {
+  id          String   @id @default(cuid())
+  listingId   String
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  offerAmount BigInt
+  message     String?
+  status      String   @default("PENDING")
+  counterAmount BigInt?
+  buyerName   String?
+  buyerPhone  String
+  buyerEmail  String?
+  buyerId     String?
+  buyer       User?    @relation("UserOffers", fields: [buyerId], references: [id], onDelete: SetNull)
+  sellerNote  String?
+  respondedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([listingId])
+}
+
+// ════════════════════════════════════════════════════════════
+// LISTING REJECTION CHAT
+// ════════════════════════════════════════════════════════════
+
+model ListingRejection {
+  id          String   @id @default(cuid())
+  listingId   String
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  reason      String
+  reasonLabel String?
+  adminNote   String
+  status      String   @default("OPEN")
+  messages    RejectionMessage[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([listingId])
+}
+
+model RejectionMessage {
+  id          String   @id @default(cuid())
+  rejectionId String
+  rejection   ListingRejection @relation(fields: [rejectionId], references: [id], onDelete: Cascade)
+  senderRole  String
+  senderName  String?
+  message     String
+  createdAt   DateTime @default(now())
+}
+
+// ════════════════════════════════════════════════════════════
+// NOTIFICATION ENGINE
+// ════════════════════════════════════════════════════════════
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String
+  link      String?
+  read      Boolean  @default(false)
+  data      String?
+  createdAt DateTime @default(now())
+  @@index([userId])
+}
+
+// ════════════════════════════════════════════════════════════
+// REFERRAL PROGRAM
+// ════════════════════════════════════════════════════════════
+
+model Referral {
+  id          String   @id @default(cuid())
+  referrerId  String
+  referrer    User     @relation("UserReferrals", fields: [referrerId], references: [id], onDelete: Cascade)
+  referralCode String  @unique @default(cuid())
+  referredEmail String?
+  referredMobile String?
+  referredUserId String?
+  status      String   @default("PENDING")
+  reward      String?
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+}
+
+// ════════════════════════════════════════════════════════════
+// FOUNDING SELLERS
+// ════════════════════════════════════════════════════════════
+
+model FoundingSeller {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation("UserFoundingStatus", fields: [userId], references: [id], onDelete: Cascade)
+  badgeType String   @default("FOUNDING")
+  benefits  String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+// ════════════════════════════════════════════════════════════
+// PREMIUM SUBSCRIPTION + SUBSCRIPTION PLAN (Phase 7 Monetization)
+// ════════════════════════════════════════════════════════════
+
+// PHASE-7: Editable subscription plans (replaces hardcoded constants)
+model SubscriptionPlan {
+  id              String   @id @default(cuid())
+  code            String   @unique // BASIC | PRO | PREMIUM | custom
+  nameFa          String
+  nameEn          String?
+  description     String?
+  priceMonthly    BigInt   @default(0) // Tomans
+  priceYearly     BigInt?  // Tomans
+  currency        String   @default("IRR")
+  featuredCredits Int      @default(0)
+  analyticsAccess Boolean  @default(false)
+  aiAssistantAccess Boolean @default(false)
+  priorityLeads   Boolean  @default(false)
+  companyPage     Boolean  @default(false)
+  maxListings     Int      @default(0)
+  maxImages       Int      @default(8)
+  verifiedBadge   Boolean  @default(false)
+  supportLevel    String?  // BASIC | PRIORITY | DEDICATED
+  sortOrder       Int      @default(0)
+  active          Boolean  @default(true)
+  popular         Boolean  @default(false)
+  featuresJson    String?  // JSON array of feature strings
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model PremiumSubscription {
+  id          String    @id @default(cuid())
+  userId      String    @unique
+  user        User      @relation("UserPremium", fields: [userId], references: [id], onDelete: Cascade)
+  plan        String    @default("BASIC")
+  status      String    @default("ACTIVE")
+  startedAt   DateTime  @default(now())
+  expiresAt   DateTime?
+  featuredCredits Int   @default(0)
+  analyticsAccess Boolean @default(false)
+  aiAssistantAccess Boolean @default(false)
+  priorityLeads   Boolean @default(false)
+  companyPage     Boolean @default(false)
+  amount      BigInt?
+  paymentRef  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// ════════════════════════════════════════════════════════════
+// MACHINE PASSPORT
+// ════════════════════════════════════════════════════════════
+
+model MachinePassport {
+  id          String   @id @default(cuid())
+  listingId   String   @unique
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  serialNumber String?
+  inspectionDate DateTime?
+  inspectionResult String?
+  events      PassportEvent[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PassportEvent {
+  id          String   @id @default(cuid())
+  passportId  String
+  passport    MachinePassport @relation(fields: [passportId], references: [id], onDelete: Cascade)
+  eventType   String
+  title       String
+  description String?
+  date        DateTime
+  performedBy String?
+  createdAt   DateTime @default(now())
+}
+
+// ════════════════════════════════════════════════════════════
+// COMPANY PAGES
+// ════════════════════════════════════════════════════════════
+
+model Company {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  logoUrl     String?
+  coverImage  String?
+  website     String?
+  phone       String?
+  email       String?
+  address     String?
+  city        String?
+  province    String?
+  verified    Boolean  @default(false)
+  premium     Boolean  @default(false)
+  status      String   @default("ACTIVE")
+  metaTitle       String?
+  metaDescription String?
+  viewCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]   @relation("CompanyUsers")
+  listings    Listing[] @relation("CompanyListings")
+  claims      CompanyClaim[]
+  // P1-17 — Company verification lifecycle (additive)
+  documents     CompanyDocument[]
+  branches      CompanyBranch[]
+  verifications CompanyVerification[]
+  // P2-5a — Company Network (partnership links). Additive — no
+  // existing columns touched. `partners` are companies this company
+  // has invited to partner; `partnerOf` are partners who invited
+  // this company. The same row appears in both lists.
+  partners       CompanyPartner[] @relation("CompanyPartners")
+  partnerOf      CompanyPartner[] @relation("CompanyPartnerOf")
+  // REVIEW-01: denormalized rating cache (recomputed from PUBLISHED reviews)
+  avgRating      Float?
+  reviewCount    Int      @default(0)
+  reviews        Review[]
+}
+
+// ════════════════════════════════════════════════════════════
+// P2-5a — COMPANY NETWORK
+// Companies can invite other companies to partner up (B2B trust
+// graph). Status: PENDING | ACCEPTED | REJECTED. Either company
+// can remove the partnership after acceptance.
+// ════════════════════════════════════════════════════════════
+
+model CompanyPartner {
+  id            String    @id @default(cuid())
+  companyId     String
+  company       Company   @relation("CompanyPartners", fields: [companyId], references: [id], onDelete: Cascade)
+  partnerId     String
+  partner       Company   @relation("CompanyPartnerOf", fields: [partnerId], references: [id], onDelete: Cascade)
+  status        String    @default("PENDING") // PENDING | ACCEPTED | REJECTED
+  requestedAt   DateTime  @default(now())
+  acceptedAt    DateTime?
+  notes         String?
+
+  @@unique([companyId, partnerId])
+  @@index([companyId])
+  @@index([partnerId])
+  @@index([status])
+}
+
+// ════════════════════════════════════════════════════════════
+// P1-17 — COMPANY VERIFICATION LIFECYCLE
+// (HEAVIX-AUDIT-2026-09-20 §6 — additive; no breaking change to
+//  the existing Company row shape.)
+// ════════════════════════════════════════════════════════════
+
+model CompanyDocument {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type        String   // BUSINESS_LICENSE | TAX_CERT | OWNERSHIP_PROOF | REPRESENTATIVE_ID | BANK_STATEMENT | OTHER
+  url         String
+  status      String   @default("PENDING") // PENDING | VERIFIED | REJECTED
+  verifiedBy  String?
+  verifiedAt  DateTime?
+  createdAt   DateTime @default(now())
+  @@index([companyId])
+}
+
+model CompanyBranch {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  address     String?
+  cityId      String?
+  city        City?    @relation(fields: [cityId], references: [id], onDelete: SetNull)
+  phone       String?
+  isHeadquarters Boolean @default(false)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  @@index([companyId])
+}
+
+model CompanyVerification {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  status      String   @default("PENDING") // PENDING | UNDER_REVIEW | VERIFIED | REJECTED | EXPIRED | REVOKED
+  verificationType String @default("BUSINESS") // PHONE | EMAIL | BUSINESS | DOCUMENT | INSPECTION
+  submittedAt DateTime @default(now())
+  reviewedAt  DateTime?
+  reviewedBy  String?
+  notes       String?
+  // PHASE-5: Evidence + Expiration + Revocation
+  evidence    String?  // JSON: [{ type, url, description }]
+  expiresAt   DateTime? // VERIFIED status can expire
+  revokedAt   DateTime?
+  revokedBy   String?
+  revokeReason String?
+  @@index([companyId])
+  @@index([status])
+}
+
+// ════════════════════════════════════════════════════════════
+// DEAL ROOM
+// ════════════════════════════════════════════════════════════
+
+model DealRoom {
+  id          String   @id @default(cuid())
+  listingId   String
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyerId     String?
+  buyer       User?    @relation("DealRoomBuyer", fields: [buyerId], references: [id], onDelete: SetNull)
+  sellerId    String?
+  seller      User?    @relation("DealRoomSeller", fields: [sellerId], references: [id], onDelete: SetNull)
+  buyerPhone  String
+  sellerPhone String?
+  status      String   @default("OPEN") // OPEN | NEGOTIATING | AGREED | INSPECTION | TRANSPORT | COMPLETED | CANCELLED
+  buyerConfirmed Boolean @default(false)
+  sellerConfirmed Boolean @default(false)
+  agreedPrice BigInt?
+  lastMessageAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  messages    DealMessage[]
+  documents   DealDocument[]
+  review      Review?
+  @@index([listingId])
+}
+
+model DealMessage {
+  id        String   @id @default(cuid())
+  dealRoomId String
+  dealRoom  DealRoom @relation(fields: [dealRoomId], references: [id], onDelete: Cascade)
+  senderRole String
+  senderName String?
+  message   String
+  attachmentUrl String?
+  createdAt DateTime @default(now())
+}
+
+// P2-DEAL-INSPECT-TRANSPORT — documents attached to a deal room
+// (contract, inspection report, invoice, ownership proof, transport doc, other)
+model DealDocument {
+  id          String   @id @default(cuid())
+  dealRoomId  String
+  dealRoom    DealRoom @relation(fields: [dealRoomId], references: [id], onDelete: Cascade)
+  type        String   // CONTRACT | INSPECTION_REPORT | INVOICE | OWNERSHIP_PROOF | TRANSPORT_DOC | OTHER
+  url         String
+  uploadedBy  String?
+  status      String   @default("PENDING") // PENDING | VERIFIED | REJECTED
+  createdAt   DateTime @default(now())
+  @@index([dealRoomId])
+}
+
+// ════════════════════════════════════════════════════════════
+// INSPECTION — HEAVIX IronClad inspection requests (P2-DEAL-INSPECT-TRANSPORT)
+// ════════════════════════════════════════════════════════════
+
+model Inspection {
+  id              String   @id @default(cuid())
+  listingId       String
+  listing         Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  dealRoomId      String?
+  requestedBy     String
+  inspectorId     String?
+  status          String   @default("REQUESTED") // REQUESTED | SCHEDULED | IN_PROGRESS | COMPLETED | CANCELLED
+  scheduledDate   DateTime?
+  completedAt     DateTime?
+  checklist       String?  // JSON: [{ item, passed, notes }]
+  score           Float?   // 0..100
+  reportUrl       String?
+  photos          String?  // JSON array of URLs
+  notes           String?
+  price           BigInt?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([listingId])
+  @@index([status])
+}
+
+// ════════════════════════════════════════════════════════════
+// TRANSPORT REQUEST — heavy-machinery transport orders (P2-DEAL-INSPECT-TRANSPORT)
+// ════════════════════════════════════════════════════════════
+
+model TransportRequest {
+  id              String   @id @default(cuid())
+  listingId       String?
+  listing         Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  dealRoomId      String?
+  origin          String
+  destination     String
+  cargoType       String?
+  cargoWeight     Float?
+  cargoLength     Float?
+  cargoWidth      Float?
+  cargoHeight     Float?
+  vehicleType     String?  // FLATBED | LOWBOY | CONTAINER | SPECIAL
+  loadingDate     DateTime?
+  deliveryDate    DateTime?
+  status          String   @default("REQUESTED") // REQUESTED | QUOTING | ACCEPTED | IN_TRANSIT | DELIVERED | CANCELLED
+  quotedPrice     BigInt?
+  carrierName     String?
+  carrierPhone    String?
+  trackingCode    String?
+  notes           String?
+  requestedBy     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([status])
+}
+
+// ════════════════════════════════════════════════════════════
+// CMS — Homepage Sections, Hero, Settings, Menu
+// ════════════════════════════════════════════════════════════
+
+model HomePageSection {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  title       String
+  subtitle    String?
+  description String?
+  order       Int      @default(0)
+  active      Boolean  @default(true)
+  config      String   @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model HeroConfig {
+  id              String   @id @default("main")
+  badge           String?
+  title1          String?
+  highlight       String?
+  subtitle        String?
+  buttonText      String?
+  buttonLink      String?
+  secondBtnText   String?
+  secondBtnLink   String?
+  slide1          String?
+  slide2          String?
+  slide3          String?
+  cardServicesImg String?
+  cardFeaturedImg String?
+  cardExclusiveImg String?
+  // FIX-LISTINGS-HERO — optional Listing IDs for the 3 tilted hero cards.
+  // When set, the homepage hero fetches the referenced listing and shows
+  // its image + title + price (linked to /listings/[slug]) instead of the
+  // static card*Img asset.
+  cardServicesListingId  String?
+  cardFeaturedListingId  String?
+  cardExclusiveListingId String?
+  animationType   String?
+  statsWidth      String?
+  cardHeight      String?
+  cardWidth       String?
+  titleFontSize   String?
+  badgeAlign      String?
+  titleAlign      String?
+  highlightAlign  String?
+  subtitleAlign   String?
+  buttonAlign     String?
+  statsWidthCustom    String?
+  statsPaddingCustom  String?
+  statsGapCustom      String?
+  cardWidthCustom     String?
+  cardHeightCustom    String?
+  cardGapCustom       String?
+  cardRadiusCustom    String?
+  titleFontSizeCustom String?
+  subtitleFontSizeCustom String?
+  badgeFontSizeCustom String?
+  buttonPaddingYCustom String?
+  buttonPaddingXCustom String?
+  heroMinHeightCustom String?
+  contentMaxWidthCustom String?
+  contentGapCustom    String?
+  slideOpacityCustom  String?
+  slideIntervalCustom String?
+  overlayColorCustom  String?
+}
+
+model SiteSettings {
+  id                String   @id @default("main")
+  about             String?
+  phone             String?
+  email             String?
+  address           String?
+  workingHours      String?
+  copyright         String?
+  newsletterEnabled Boolean  @default(true)
+  // Header / footer brand assets (added by FIX-MEDIA — per-section media managers)
+  logoUrl           String?
+  footerLogoUrl     String?
+  logoText          String?
+  // CHAT-2026-09-21: logo size controls (admin can edit logo sizes)
+  logoHeight        Int?     @default(80)  // header logo height in px
+  footerLogoHeight  Int?     @default(48)  // footer logo height in px
+  showPersianName   Boolean  @default(true) // show "هویکس" next to header logo
+  // LOGO-POSITION: admin can control where the logo appears
+  logoPosition      String?  @default("right") // "right" | "center" | "left" for header
+  footerLogoPosition String? @default("center") // "right" | "center" | "left" for footer brand column
+  // TRI-BRAND FOOTER LOGOS: 3 separate upload slots for the 3 footer brand cards
+  footerHeavixLogoUrl  String?  // HEAVIX card logo (defaults to /logos/heavix-logo.svg)
+  footerMekanixLogoUrl String?  // MEKANIX card logo (defaults to /logos/mekanix-logo.svg)
+  footerAriaLogoUrl    String?  // ARIA card logo (defaults to /logos/aria-logo.svg)
+  // FIX-SALE-ANIM — configurable prepayment amount (Toman) for the
+  // "Sell in 7 Days" campaign. Default: 500,000 IRT.
+  sellIn7DaysPrepaymentAmount BigInt?
+  // FIX-SALE-ANIM — commission rate (%) charged on the final sale
+  // price when a Sell-in-7-Days listing is sold. Default: 1 (%).
+  sellIn7DaysCommissionRate  Float?
+
+  // FIX-ANIMATIONS-BRANDS — verified-machines section config.
+  verifiedSectionTitle       String?
+  verifiedSectionSubtitle    String?
+  verifiedSectionLimit       Int?
+  verifiedSectionAnimation   String?  // "marquee" | "grid" | "fade"
+  verifiedSectionVerifiedOnly Boolean?
+
+  // FIX-ANIMATIONS-BRANDS — trusted-brands section config.
+  trustedBrandsTitle         String?
+  trustedBrandsSubtitle      String?
+  trustedBrandsDescription   String?
+  trustedBrandsLimit         Int?
+  trustedBrandsTickerSpeed   Int?     // seconds for full loop
+
+  // FIX-ADMIN-EDITABILITY — duration of the animated-logo loop in
+  // the public Header (ms). Default 10000.
+  logoAnimationDurationMs    Int?     @default(10000)
+
+  // COMPARE-ENGINE — JSON array of AttributeDefinition IDs that are
+  // visible in the public compare table. When null/empty, ALL
+  // attribute rows are shown (default behavior). Admins can hide
+  // noisy attributes from /admin/compare.
+  compareVisibleAttributeIds String?
+}
+
+model MenuItem {
+  id          String   @id @default(cuid())
+  title       String
+  href        String?
+  icon        String?
+  order       Int      @default(0)
+  parentId    String?
+  openInNew   Boolean  @default(false)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ════════════════════════════════════════════════════════════
+// USERS + AUTH
+// ════════════════════════════════════════════════════════════
+
+model User {
+  id             String   @id @default(cuid())
+  firstName      String
+  lastName       String
+  email          String   @unique
+  mobile         String   @unique
+  passwordHash   String
+  userType       String   @default("INDIVIDUAL")
+  role           String   @default("BUYER") // ADMIN | SELLER | BUYER
+  status         String   @default("PENDING")
+  emailVerified  Boolean  @default(false)
+  mobileVerified Boolean  @default(false)
+  companyName    String?
+  lastLoginAt    DateTime?
+  // FIX 7: deadline for the user to verify their email; account is cleaned up
+  // (deactivated/deleted) by the admin cleanup job after this date if email
+  // remains unverified. Set to createdAt + 7 days on registration.
+  verificationDeadline DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  listings       Listing[] @relation("UserListings")
+  requests       BuyRequest[] @relation("UserRequests")
+  savedSearches  SavedSearch[] @relation("UserSavedSearches")
+  favorites      Favorite[] @relation("UserFavorites")
+  articles       Article[] @relation("UserArticles")
+  follows        Follow[] @relation("UserFollows")
+  offers         ListingOffer[] @relation("UserOffers")
+  notifications  Notification[] @relation("UserNotifications")
+  referrals      Referral[] @relation("UserReferrals")
+  foundingStatus FoundingSeller? @relation("UserFoundingStatus")
+  premium        PremiumSubscription? @relation("UserPremium")
+  payments       Payment[] @relation("UserPayments")
+  companyId      String?
+  company        Company?  @relation("CompanyUsers", fields: [companyId], references: [id], onDelete: SetNull)
+  dealRoomsAsBuyer  DealRoom[] @relation("DealRoomBuyer")
+  dealRoomsAsSeller DealRoom[] @relation("DealRoomSeller")
+  rfqs              RFQ[] @relation("UserRFQs")
+  rfqQuotes         RFQQuote[] @relation("UserRFQQuotes")
+  auctionBids       AuctionBid[] @relation("UserAuctionBids")
+  companyClaims     CompanyClaim[] @relation("UserCompanyClaims")
+  sessions       Session[]
+  verificationCodes VerificationCode[]
+  userRoles      UserRole[]
+  // P2-24 — Recommendation Engine (additive)
+  recommendations UserRecommendation[] @relation("UserRecommendations")
+  // P1-MESSAGING — Conversation participant + message sender relations
+  conversations1 Conversation[] @relation("ConvParticipant1")
+  conversations2 Conversation[] @relation("ConvParticipant2")
+  sentMessages   Message[]   @relation("MessageSender")
+  // REVIEW-01: denormalized seller rating cache (recomputed from PUBLISHED reviews)
+  avgRating      Float?
+  reviewCount    Int      @default(0)
+  reviewsReceived Review[] @relation("SellerReviews")
+  reviewsWritten  Review[] @relation("ReviewAuthor")
+  dealsAsBuyer    Deal[] @relation("DealBuyer")
+  dealsAsSeller   Deal[] @relation("DealSeller")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// P0-3: Cryptographically secure admin sessions.
+// The cookie stores a raw 32-byte random token; we persist only its SHA-256
+// hash so a DB leak cannot be replayed. Rows are deleted on logout (revocation)
+// and on expiry ( isAuthenticated() prunes lazily ).
+model AdminSession {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  username  String                         // which admin credential issued it
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  @@index([expiresAt])
+}
+
+model VerificationCode {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String
+  type      String   @default("MOBILE")
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// ════════════════════════════════════════════════════════════
+// LEGACY
+// ════════════════════════════════════════════════════════════
+
+model Setting {
+  key   String @id
+  value String
+}
+
+// ════════════════════════════════════════════════════════════
+// SOCIAL MEDIA REELS — AI-generated short videos for listings
+// ════════════════════════════════════════════════════════════
+
+model SocialReel {
+  id            String   @id @default(cuid())
+  listingId     String
+  listing       Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  platform      String   // FACEBOOK | INSTAGRAM | TIKTOK | WHATSAPP | TELEGRAM | ALL
+  videoUrl      String?
+  thumbnailUrl  String?
+  duration      Int      @default(5) // seconds
+  status        String   @default("PENDING") // PENDING | PROCESSING | READY | FAILED
+  prompt        String?
+  taskId        String?  // AI video generation task ID
+  caption       String?  // social media caption text
+  hashtags      String?  // comma-separated hashtags
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@index([listingId])
+  @@index([status])
+  @@index([platform])
+}
+
+// ════════════════════════════════════════════════════════════
+// P0-4 — AUDIT LOG (append-only)
+// HEAVIX-SECURITY-BASELINE-V1.md §10, §5
+// HEAVIX-P0-IMPLEMENTATION-PLAN.md STEP 4
+// ════════════════════════════════════════════════════════════
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorId     String?
+  actorType   String   @default("USER") // USER | ADMIN | SYSTEM | AI
+  action      String   // e.g. "listing.publish", "user.suspend", "brand.update"
+  entityType  String   // e.g. "Listing", "User", "Brand"
+  entityId    String?
+  beforeJson  String?
+  afterJson   String?
+  ip          String?
+  userAgent   String?
+  requestId   String?
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ════════════════════════════════════════════════════════════
+// P0-5 — RBAC (Role / Permission / RolePermission / UserRole)
+// HEAVIX-SECURITY-BASELINE-V1.md §3, §5
+// HEAVIX-P0-IMPLEMENTATION-PLAN.md STEP 3
+// ════════════════════════════════════════════════════════════
+
+model Role {
+  id          String   @id @default(cuid())
+  key         String   @unique // ADMIN | SELLER | BUYER | MODERATOR | SUPPORT
+  nameFa      String
+  nameEn      String?
+  description String?
+  permissions RolePermission[]
+  users       UserRole[]
+  createdAt   DateTime @default(now())
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g. "listing.publish", "brand.update", "user.suspend"
+  nameFa      String
+  nameEn      String?
+  description String?
+  resource    String   // e.g. "listing", "brand", "user", "taxonomy", "security", "ai"
+  roles       RolePermission[]
+  createdAt   DateTime @default(now())
+}
+
+model RolePermission {
+  id           String @id @default(cuid())
+  roleId       String
+  role         Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model UserRole {
+  id        String @id @default(cuid())
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId    String
+  role      Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+}
+
+// ════════════════════════════════════════════════════════════
+// P1 — CATALOG ENTITIES (Product / Machine / Part / Attachment)
+// HEAVIX-CORRECTED-REFERENCE-V1.1.md §4 (Canonical Domain Model) + §5 (Product vs Listing)
+// HEAVIX-P0-IMPLEMENTATION-PLAN.md STEP 8 (Product/Machine), STEP 9 (Compatibility)
+// ════════════════════════════════════════════════════════════
+
+// P1-1: Product — canonical catalog entity (Brand → Model → Product)
+model Product {
+  id            String   @id @default(cuid())
+  categoryId    String
+  category      Category @relation(fields: [categoryId], references: [id])
+  brandId       String?
+  brand         Brand?   @relation(fields: [brandId], references: [id])
+  modelId       String?
+  model         ProductModel? @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  canonicalName String
+  slug          String   @unique
+  status        String   @default("ACTIVE") // DRAFT | PENDING_REVIEW | ACTIVE | INACTIVE | ARCHIVED
+  description   String?
+  // Provenance (Data Governance V1)
+  source        String?  // MANUAL | AI_SUGGESTED | IMPORTED
+  confidence    Float?
+  verifiedAt    DateTime?
+  verifiedBy    String?
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  listings      Listing[]
+  machines      Machine[]
+  parts         Part[]
+  attachments   Attachment[]
+  priceRecords  PriceRecord[]
+  @@index([categoryId])
+  @@index([brandId])
+}
+
+// P1-2: Machine — physical instance of a Product (1 machine can have multiple listings over time; 1 primary)
+model Machine {
+  id            String   @id @default(cuid())
+  productId     String?
+  product       Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  listingId     String?  // primary listing
+  listing       Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  serialNumber  String?
+  manufactureYear Int?
+  hours         Int?
+  condition     String?
+  ownershipHistory String? // JSON string
+  status        String   @default("ACTIVE") // DRAFT | ACTIVE | SOLD | ARCHIVED
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@index([productId])
+}
+
+// P1-3: Part — spare parts catalog entity
+model Part {
+  id            String   @id @default(cuid())
+  productId     String?
+  product       Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  partNumber    String?
+  oemNumber     String?
+  condition     String?
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@index([productId])
+}
+
+// P1-3: Attachment — auxiliary equipment (bucket, fork, breaker, etc.)
+model Attachment {
+  id            String   @id @default(cuid())
+  productId     String?
+  product       Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  attachmentType String?
+  capacity      String?
+  condition     String?
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@index([productId])
+}
+
+// P1-4: Compatibility Graph — generic edge between any two catalog entities
+// HEAVIX-P0-IMPLEMENTATION-PLAN.md STEP 9
+model CompatibilityEdge {
+  id              String   @id @default(cuid())
+  sourceEntityType String  // Product | Machine | Part | Attachment | Model
+  sourceEntityId   String
+  targetEntityType String
+  targetEntityId   String
+  relationType     String  // COMPATIBLE_WITH | FITS | REPLACES | UPGRADES | REQUIRES
+  confidence       Float?
+  source           String? // MANUAL | AI_SUGGESTED | OEM_DOCUMENT
+  verified         Boolean @default(false)
+  verifiedBy       String?
+  verifiedAt       DateTime?
+  createdAt        DateTime @default(now())
+  @@unique([sourceEntityType, sourceEntityId, targetEntityType, targetEntityId, relationType])
+  @@index([sourceEntityType, sourceEntityId])
+  @@index([targetEntityType, targetEntityId])
+}
+
+// ════════════════════════════════════════════════════════════
+// P2 — INTELLIGENCE LAYER
+// HEAVIX-P0-IMPLEMENTATION-PLAN.md P2-21 (Knowledge Graph),
+// P2-22 (Price Intelligence), P2-23 (Demand Engine).
+// Additive only — no existing rows/columns touched.
+// ════════════════════════════════════════════════════════════
+
+// P2-22 — Price Intelligence: track every observed price for a
+// Listing / Product / Category+Brand combo so the analytics layer
+// can compute averages, history, outliers and seller suggestions.
+model PriceRecord {
+  id          String   @id @default(cuid())
+  listingId   String?
+  listing     Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  productId   String?
+  product     Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  categoryId  String?
+  brandId     String?
+  price       Float
+  currency    String   @default("IRR")
+  year        Int?
+  condition   String?
+  recordedAt  DateTime @default(now())
+  source      String   @default("LISTING") // LISTING | MANUAL | AI_ESTIMATE
+  @@index([productId])
+  @@index([categoryId, brandId])
+  @@index([recordedAt])
+}
+
+// P2-23 — Demand Engine: every public search query is logged so
+// the demand layer can surface zero-result queries, popular searches
+// and demand-vs-supply per category/brand.
+model SearchQuery {
+  id          String   @id @default(cuid())
+  query       String
+  normalizedQuery String
+  resultCount Int      @default(0)
+  userId      String?
+  ip          String?
+  categorySlug String?
+  brandSlug   String?
+  hasResults  Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  @@index([normalizedQuery])
+  @@index([createdAt])
+  @@index([hasResults])
+}
+
+// ════════════════════════════════════════════════════════════
+// P2-26 — AI AGENTS PLATFORM
+// HEAVIX-P0-IMPLEMENTATION-PLAN.md P2-26 (AI agents).
+// Lightweight registry: admin-configurable agent rows + runner
+// functions. AI SUGGESTS, admin APPROVES (HBR-1.0 law 8).
+// Additive only — no existing rows/columns touched.
+// ════════════════════════════════════════════════════════════
+
+model AIAgent {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g. "listing-enricher", "brand-researcher", "category-image-gen"
+  nameFa      String
+  nameEn      String?
+  description String?
+  taskType    String   // maps to AITaskPolicy.taskType
+  config      String?  // JSON string with agent-specific config
+  active      Boolean  @default(true)
+  lastRunAt   DateTime?
+  lastStatus  String?  // SUCCESS | FAILED | RUNNING
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ════════════════════════════════════════════════════════════
+// P2-27 — OPPORTUNITY ENGINE
+// HEAVIX-P0-IMPLEMENTATION-PLAN.md P2-27 (Opportunity Engine).
+// Persisted opportunities surfaced by periodic scans. Each has a
+// 0..1 score and a workflow status (NEW → SEEN → ACTED_ON / DISMISSED).
+// Additive only.
+// ════════════════════════════════════════════════════════════
+
+model Opportunity {
+  id          String   @id @default(cuid())
+  type        String   // UNDERPRICED_LISTING | HIGH_DEMAND_LOW_SUPPLY | TRENDING_BRAND | PRICE_DROP | NEW_TREND
+  entityType  String   // Listing | Category | Brand
+  entityId    String?
+  title       String
+  description String?
+  score       Float    // 0..1 opportunity score
+  metadata    String?  // JSON
+  status      String   @default("NEW") // NEW | SEEN | ACTED_ON | DISMISSED
+  createdAt   DateTime @default(now())
+  @@index([type, status])
+  @@index([createdAt])
+}
+
+// ════════════════════════════════════════════════════════════
+// P2-28 — ADVANCED SEO AUTOMATION
+// HEAVIX-P0-IMPLEMENTATION-PLAN.md P2-28 (SEO metadata + sitemap +
+// structured data). Generic per-entity SEO row keyed by (entityType,
+// entityId). Existing BrandSEO table is preserved (additive only).
+// ════════════════════════════════════════════════════════════
+
+model SEOMetadata {
+  id            String   @id @default(cuid())
+  entityType    String   // Category | Brand | Product | Listing | Article | Page
+  entityId      String
+  metaTitle     String?
+  metaDescription String?
+  keywords      String?  // comma-separated
+  canonicalUrl  String?
+  ogImage       String?
+  ogTitle       String?
+  ogDescription String?
+  structuredData String? // JSON-LD string
+  robotsIndex   Boolean  @default(true)
+  robotsFollow  Boolean  @default(true)
+  sitemapPriority Float @default(0.5)
+  sitemapChangeFreq String @default("weekly") // always|hourly|daily|weekly|monthly|yearly|never
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@unique([entityType, entityId])
+  @@index([entityType])
+}
+
+// ════════════════════════════════════════════════════════════
+// P2-24 — RECOMMENDATION ENGINE
+// HEAVIX-P0-IMPLEMENTATION-PLAN.md P2-24 (Recommendation)
+// Additive only — no existing rows/columns touched.
+//
+// Per-user recommendation rows. Generated by src/lib/recommendations.ts
+// from multiple signals: viewed/favorited listings, same category/brand
+// affinity, trending, and new-in-watched-category. Each row carries a
+// reason code + a 0..1 confidence score. Dismissed rows stay in the
+// table (so we don't re-suggest them) but are filtered out of the
+// active recommendation feed.
+// ════════════════════════════════════════════════════════════
+
+model UserRecommendation {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation("UserRecommendations", fields: [userId], references: [id], onDelete: Cascade)
+  listingId   String
+  listing     Listing   @relation("ListingRecommendations", fields: [listingId], references: [id], onDelete: Cascade)
+  // SIMILAR_TO_VIEWED | SAME_CATEGORY | SAME_BRAND | PRICE_DROP |
+  // NEW_IN_WATCHLIST_CATEGORY | TRENDING
+  reason      String
+  // 0..1 confidence score — higher = stronger signal.
+  score       Float     @default(0)
+  dismissed   Boolean   @default(false)
+  clickedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  @@unique([userId, listingId, reason])
+  @@index([userId, createdAt])
+  @@index([userId, dismissed])
+}
+
+// ════════════════════════════════════════════════════════════
+// SITE STATS — admin-editable dynamic stats panel for the
+// homepage hero + stats section. Each row maps a `metric`
+// (categories | brands | listings | provinces | models |
+// companies | users | listings_published | auctions_active |
+// rfq_open | custom_value) to a live count computed from the DB,
+// or to a static `customValue`. FIX-STATS.
+// ════════════════════════════════════════════════════════════
+
+model SiteStat {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g. "categories", "brands", "listings", "provinces", "models", "companies", "custom"
+  labelFa     String
+  labelEn     String?
+  metric      String   // categories | brands | listings | provinces | models | companies | users | listings_published | auctions_active | rfq_open | custom_value
+  customValue String?  // if metric=custom_value, the admin sets a static value
+  icon        String?
+  sortOrder   Int      @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ════════════════════════════════════════════════════════════
+// SELL IN 7 DAYS — full registration + tracking flow with
+// prepayment + 1% commission on sale. (FIX-SALE-ANIM)
+//
+//   Step 1: PENDING_PREPAYMENT → PREPAYMENT_PAID
+//   Step 2: INSPECTION_SCHEDULED → INSPECTED
+//   Step 3: VALUATION_DONE
+//   Step 4: LISTED → SOLD (1% commission on salePrice)
+//   Terminal: CANCELLED
+// ════════════════════════════════════════════════════════════
+
+model SellIn7DaysApplication {
+  id               String   @id @default(cuid())
+  trackingCode     String   @unique
+  sellerName       String
+  sellerMobile     String
+  sellerEmail      String?
+  deviceName       String
+  categoryId       String?
+  brandId          String?
+  modelName        String?
+  year             Int?
+  workingHours     Int?
+  condition        String?
+  province         String?
+  city             String?
+  expectedPrice    BigInt?
+  description      String?
+  prepaymentPaid   Boolean  @default(false)
+  prepaymentAmount BigInt?
+  status           String   @default("PENDING_PREPAYMENT") // PENDING_PREPAYMENT | PREPAYMENT_PAID | INSPECTION_SCHEDULED | INSPECTED | VALUATION_DONE | LISTED | SOLD | CANCELLED
+  currentStep      Int      @default(1) // 1-4
+  inspectionDate   DateTime?
+  valuationPrice   BigInt?
+  salePrice        BigInt?
+  commissionAmount BigInt? // 1% of salePrice (or configured rate)
+  soldAt           DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  @@index([status])
+  @@index([sellerMobile])
+}
+
+// ════════════════════════════════════════════════════════════
+// PRICE ESTIMATION ENGINE (HEAVIX-PRICE-ESTIMATION-SPEC-V1.0)
+// PRICE-ENGINE task — additive, server-only via src/lib/price-engine.ts
+// ════════════════════════════════════════════════════════════
+
+model PriceObservation {
+  id              String   @id @default(cuid())
+  listingId       String?
+  listing         Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  productId       String?
+  brandId         String?
+  brand           Brand?   @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  categoryId      String?
+  category        Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  modelId         String?
+  // Price data
+  askingPrice     BigInt?
+  estimatedPrice  Float?
+  priceLower      Float?
+  priceUpper      Float?
+  currency        String   @default("IRR")
+  // Normalized
+  normalizedPrice Float?
+  // Metadata
+  source          String   @default("LISTING") // LISTING | MANUAL | AI_ESTIMATE | EXTERNAL
+  sourceType      String?  // HEAVIX | DIVAR | SHEYPOOR | OTHER
+  observedAt      DateTime @default(now())
+  market          String?  // IRAN | REGIONAL
+  quality         String   @default("MEDIUM") // HIGH | MEDIUM | LOW
+  status          String   @default("ACTIVE") // ACTIVE | FLAGGED | EXCLUDED
+  // Provenance
+  confidence      String?  // HIGH | MEDIUM | LOW | INSUFFICIENT
+  comparableCount Int?
+  notes           String?
+  createdAt       DateTime @default(now())
+  @@index([brandId, categoryId])
+  @@index([modelId])
+  @@index([observedAt])
+}
+
+model PriceEstimate {
+  id              String   @id @default(cuid())
+  listingId       String?
+  listing         Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  estimatedPrice  Float
+  priceLower      Float
+  priceUpper      Float
+  confidence      String   @default("MEDIUM") // HIGH | MEDIUM | LOW | INSUFFICIENT
+  comparableCount Int      @default(0)
+  dataFreshness   String?  // FRESH | RECENT | STALE
+  mainDrivers     String?  // JSON array of price drivers
+  warnings        String?  // JSON array of warnings
+  modelVersion    String   @default("v1.0")
+  createdAt       DateTime @default(now())
+  @@index([listingId])
+}
+
+model PriceOverride {
+  id          String   @id @default(cuid())
+  listingId   String
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  originalEstimate Float
+  overridePrice    Float
+  reason      String
+  overriddenBy String?
+  overriddenAt DateTime @default(now())
+  @@index([listingId])
+}
+
+
+// ════════════════════════════════════════════════════════════
+// HEAVIX MACHINE COMPARISON ENGINE (V1.0)
+// docs/HEAVIX-MACHINE-COMPARISON-SPEC-V1.0.md
+// Persistent comparison sessions with optional share tokens.
+// Additive only — no existing rows/columns touched.
+// ════════════════════════════════════════════════════════════
+
+model ComparisonSession {
+  id              String   @id @default(cuid())
+  userId          String?
+  name            String?
+  shareToken      String?  @unique
+  shareExpiresAt  DateTime?
+  status          String   @default("ACTIVE") // ACTIVE | ARCHIVED
+  aiSummary       String?  // cached LLM summary (last generation)
+  aiSummaryAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  items           ComparisonItem[]
+}
+
+model ComparisonItem {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     ComparisonSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  listingId   String?
+  listing     Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  productId   String?
+  brandId     String?
+  modelId     String?
+  sortOrder   Int      @default(0)
+  @@index([sessionId])
+}
+
+// ════════════════════════════════════════════════════════════
+// P1-MESSAGING — Direct messaging between users (optionally tied to a Listing)
+// ============================================================
+// Conversation holds two participants. To keep the @@unique key stable,
+// we always store the lexicographically smaller userId as participant1Id
+// and the larger one as participant2Id (normalised by the API layer).
+// listingId is optional — a conversation can be free-floating or tied to
+// a specific listing. SQLite treats NULL as distinct in unique indexes,
+// so two "general" conversations between the same two users could exist;
+// the API upserts by explicit (p1, p2, listingId) lookup first to avoid
+// creating duplicates.
+// ════════════════════════════════════════════════════════════
+
+model Conversation {
+  id               String    @id @default(cuid())
+  listingId        String?
+  listing          Listing?  @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  participant1Id   String
+  participant1     User      @relation("ConvParticipant1", fields: [participant1Id], references: [id], onDelete: Cascade)
+  participant2Id   String
+  participant2     User      @relation("ConvParticipant2", fields: [participant2Id], references: [id], onDelete: Cascade)
+  lastMessageAt    DateTime?
+  lastMessagePreview String?
+  status           String    @default("ACTIVE") // ACTIVE | ARCHIVED
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  messages         Message[]
+
+  @@unique([participant1Id, participant2Id, listingId])
+  @@index([participant1Id])
+  @@index([participant2Id])
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  body           String
+  attachmentUrl  String?
+  read           Boolean      @default(false)
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+// ════════════════════════════════════════════════════════════
+// P1-ANALYTICS-MODERATION-ALERTS
+// Analytics event stream (BI) + Moderation loop (AI scan + human review)
+// Additive only — no existing rows/columns touched.
+// ════════════════════════════════════════════════════════════
+
+model AnalyticsEvent {
+  id          String   @id @default(cuid())
+  // LISTING_VIEW | SEARCH | CLICK | FAVORITE | COMPARE | CONTACT |
+  // SHARE | REGISTER | LOGIN | LISTING_CREATE | OFFER_MAKE
+  eventType   String
+  userId      String?
+  listingId   String?
+  categoryId  String?
+  brandId     String?
+  query       String?
+  page        String?
+  referrer    String?
+  ip          String?
+  userAgent   String?
+  metadata    String?  // JSON
+  createdAt   DateTime @default(now())
+
+  @@index([eventType])
+  @@index([userId])
+  @@index([listingId])
+  @@index([createdAt])
+}
+
+model ModerationLog {
+  id          String   @id @default(cuid())
+  listingId   String
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  // AI_SCAN | FLAG | APPROVE | REJECT | OVERRIDE
+  action      String
+  reason      String?
+  riskScore   Float?   // 0..1
+  flaggedIssues String? // JSON array
+  moderatorId String?
+  createdAt   DateTime @default(now())
+
+  @@index([listingId])
+  @@index([action])
+}
+
+// ════════════════════════════════════════════════════════════
+// PHASE-7: PAYMENT + LEDGER (Monetization)
+// ════════════════════════════════════════════════════════════
+
+model Payment {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation("UserPayments", fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionId  String?
+  orderId         String?
+  order           Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  amount          BigInt
+  currency        String    @default("IRR")
+  type            String    // SUBSCRIPTION | FEATURED_LISTING | PROMOTION | LEAD_FEE | INSPECTION_FEE | ORDER_PAYMENT | COMMISSION | REFUND
+  status          String    @default("PENDING") // PENDING | AUTHORIZED | PAID | FAILED | CANCELLED | REFUNDED
+  gateway         String?   // ZARINPAL | PAYIR | MANUAL
+  providerReference String?
+  trackingCode    String?
+  idempotencyKey  String?   @unique
+  paidAt          DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([orderId])
+}
+
+// ════════════════════════════════════════════════════════════
+// REVIEW-01 — Seller / Company Reviews + Ratings
+// B2B trust building: verified-deal reviews auto-publish, others
+// queue for admin moderation. Sellers/companies can respond once.
+// ════════════════════════════════════════════════════════════
+
+model Review {
+  id              String   @id @default(cuid())
+  authorId        String
+  author          User     @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  // Exactly one of companyId / sellerId must be set
+  companyId       String?
+  company         Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  sellerId        String?
+  seller          User?    @relation("SellerReviews", fields: [sellerId], references: [id], onDelete: Cascade)
+
+  // Optional context anchors
+  dealRoomId      String?  @unique // one review per deal
+  dealRoom        DealRoom? @relation(fields: [dealRoomId], references: [id], onDelete: SetNull)
+  dealId          String?  @unique // one review per deal (Phase 9 link)
+  deal            Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  orderId         String?  // optional order link
+  listingId       String?
+  listing         Listing?  @relation(fields: [listingId], references: [id], onDelete: SetNull)
+
+  rating          Int      // 1..5
+  title           String?
+  body            String
+  verifiedDeal    Boolean  @default(false)
+
+  // Seller/company response (one-shot)
+  sellerResponse   String?
+  sellerRespondedAt DateTime?
+
+  // Moderation
+  status          String   @default("PENDING") // PENDING | PUBLISHED | REJECTED | HIDDEN
+  adminNotes      String?
+  moderatedAt     DateTime?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([companyId, status])
+  @@index([sellerId, status])
+  @@index([status])
+}
+
+// ════════════════════════════════════════════════════════════
+// PHASE 9 — ORDERS / DEALS / TRANSACTIONS
+// Per HEAVIX Master Execution Plan V3.0 Phase 9.
+// Closes the gap between DealRoom/Offer → Deal → Order → Transaction.
+// ════════════════════════════════════════════════════════════
+
+// Deal — created when an Offer or Quote is accepted.
+// Source can be a ListingOffer, RFQQuote, or DealRoom (AGREED).
+model Deal {
+  id              String    @id @default(cuid())
+  dealNumber      String    @unique
+  // Source
+  sourceType      String    // LISTING_OFFER | RFQ_QUOTE | DEAL_ROOM
+  sourceId        String    // ID of the originating offer/quote/dealroom
+  // Parties
+  buyerId         String?
+  buyer           User?     @relation("DealBuyer", fields: [buyerId], references: [id], onDelete: SetNull)
+  sellerId        String?
+  seller          User?     @relation("DealSeller", fields: [sellerId], references: [id], onDelete: SetNull)
+  // Context
+  listingId       String?
+  listing         Listing?  @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  // Terms
+  agreedAmount    BigInt?
+  currency        String    @default("IRR")
+  transactionType String    @default("SALE")
+  // Lifecycle: DRAFT → PENDING_CONFIRMATION → CONFIRMED → IN_PROGRESS → COMPLETED
+  // Terminal: CANCELLED, DISPUTED, EXPIRED
+  status          String    @default("DRAFT")
+  // Timestamps
+  agreedAt        DateTime?
+  confirmedAt     DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  // Metadata
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  // Relations
+  order           Order?
+  disputes        Dispute[]
+  review          Review?
+
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([listingId])
+  @@index([status])
+}
+
+// Order — business transaction created from a confirmed Deal.
+// Contains snapshots of key info (price, title) at time of creation.
+model Order {
+  id              String    @id @default(cuid())
+  orderNumber     String    @unique
+  dealId          String    @unique
+  deal            Deal      @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  // Snapshots (immutable at creation)
+  titleSnapshot   String
+  priceSnapshot   BigInt
+  currencySnapshot String   @default("IRR")
+  sellerSnapshot  String?
+  buyerSnapshot   String?
+  quantity        Int       @default(1)
+  // Lifecycle: PENDING → CONFIRMED → PROCESSING → FULFILLED → COMPLETED
+  // Terminal: CANCELLED
+  status          String    @default("PENDING")
+  // Commission
+  commissionRate  Float?    // percentage
+  commissionAmount BigInt?  // in currency
+  sellerAmount    BigInt?   // after commission
+  // Timestamps
+  confirmedAt     DateTime?
+  fulfilledAt     DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  // Relations
+  payments        Payment[]
+  disputes        Dispute[]
+  // Metadata
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status])
+}
+
+// Dispute — can be opened on a Deal or Order.
+model Dispute {
+  id              String    @id @default(cuid())
+  dealId          String?
+  deal            Deal?     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  orderId         String?
+  order           Order?    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Lifecycle: OPEN → UNDER_REVIEW → RESOLVED | CANCELLED
+  status          String    @default("OPEN")
+  reason          String
+  description     String?
+  evidence        String?   // JSON: [{ type, url, description }]
+  openedBy        String    // userId
+  openedAt        DateTime  @default(now())
+  // Resolution
+  resolution      String?
+  resolvedBy      String?
+  resolvedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([dealId])
+  @@index([orderId])
+  @@index([status])
+}

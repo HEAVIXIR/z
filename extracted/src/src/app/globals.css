@@ -1,0 +1,504 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   HEAVIX — design tokens (dark, Aria-coordinated orange theme)
+   ============================================================ */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-vazirmatn);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.875rem;
+  /* Aria dark palette */
+  --background: #0b0b0b;
+  --foreground: #ffffff;
+  --card: #141414;
+  --card-foreground: #ffffff;
+  --popover: #141414;
+  --popover-foreground: #ffffff;
+  --primary: #f58220;
+  --primary-foreground: #ffffff;
+  --secondary: #1b1b1b;
+  --secondary-foreground: #ffffff;
+  --muted: #1b1b1b;
+  --muted-foreground: #8c8c8c;
+  --accent: #1c1c1c;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #f58220;
+  --chart-1: #f58220;
+  --chart-2: #10b981;
+  --chart-3: #f59e0b;
+  --chart-4: #ef4444;
+  --chart-5: #8c8c8c;
+  --sidebar: #0b0b0b;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #f58220;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1c1c1c;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #f58220;
+}
+
+.dark {
+  --background: #0b0b0b;
+  --foreground: #ffffff;
+  --card: #141414;
+  --card-foreground: #ffffff;
+  --popover: #141414;
+  --popover-foreground: #ffffff;
+  --primary: #f58220;
+  --primary-foreground: #ffffff;
+  --secondary: #1b1b1b;
+  --secondary-foreground: #ffffff;
+  --muted: #1b1b1b;
+  --muted-foreground: #8c8c8c;
+  --accent: #1c1c1c;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #f58220;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Vazirmatn", system-ui, sans-serif;
+    background-color: #0b0b0b;
+    color: #fff;
+  }
+}
+
+/* ============================================================
+   Custom scrollbar
+   ============================================================ */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #f58220;
+}
+
+/* ============================================================
+   Keyframes (ported from Aria MJ design system)
+   ============================================================ */
+html {
+  scroll-behavior: smooth;
+}
+html,
+body {
+  overflow-x: clip;
+}
+main,
+section {
+  overflow-x: clip;
+}
+.site-theme main section {
+  scroll-margin-top: 96px;
+}
+
+/* Hero zoom */
+.hero-image {
+  animation: heroZoom 9s ease-in-out forwards;
+  transform: scale(1.08);
+}
+@keyframes heroZoom {
+  from {
+    transform: scale(1.08);
+  }
+  to {
+    transform: scale(1.18);
+  }
+}
+
+/* Marquee */
+@keyframes marquee-ltr {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes marquee-rtl {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* Industrial rig animations (loader / grader / roller) */
+@keyframes rig-drive {
+  0% {
+    left: 100%;
+  }
+  100% {
+    left: -100%;
+  }
+}
+.rig-track {
+  position: absolute;
+  bottom: 4px;
+  animation: rig-drive 30s linear infinite;
+}
+@keyframes wheel-spin {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+.rig-wheel {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: wheel-spin 1s linear infinite;
+}
+@keyframes rig-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1.5px);
+  }
+}
+.rig-body {
+  animation: rig-bob 0.8s ease-in-out infinite;
+}
+.rig-body.slow {
+  animation-duration: 1.1s;
+}
+.rig-body.fast {
+  animation-duration: 0.45s;
+}
+@keyframes arm-lift {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(-9deg);
+  }
+}
+.rig-arm {
+  transform-origin: 92% 45%;
+  transform-box: fill-box;
+  animation: arm-lift 3.2s ease-in-out infinite;
+}
+.rig-arm.active {
+  animation-duration: 0.9s;
+}
+@keyframes blade-scrape {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(1.5px);
+  }
+}
+.rig-blade {
+  animation: blade-scrape 1.4s ease-in-out infinite;
+}
+@keyframes beacon-blink {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.rig-beacon {
+  animation: beacon-blink 1.6s ease-in-out infinite;
+}
+@keyframes signal-blink {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.rig-signal {
+  animation: signal-blink 1s steps(2, start) infinite;
+}
+.rig-signal.delay {
+  animation-delay: 0.5s;
+}
+
+/* Conveyor bar (in hero search) */
+@keyframes conveyor-move {
+  to {
+    background-position: 56px 0;
+  }
+}
+.conveyor {
+  height: 6px;
+  border-radius: 999px;
+  background: repeating-linear-gradient(-45deg, #f58220 0 14px, #141414 14px 28px);
+  animation: conveyor-move 1.2s linear infinite;
+}
+
+/* News/feature swap */
+@keyframes news-swap {
+  from {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.news-swap {
+  animation: news-swap 0.7s ease;
+}
+
+/* ============================================================
+   FIX-SALE-ANIM — verified-machines carousel + featured + popular
+   ============================================================ */
+
+/* Circular carousel — listings positioned around a circle, slowly
+   rotating. The track rotates clockwise; each card counter-rotates
+   to stay upright. */
+@keyframes rotate-circle {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+@keyframes counter-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-360deg);
+  }
+}
+.vm-carousel-track {
+  animation: rotate-circle 40s linear infinite;
+}
+.vm-carousel-track:hover {
+  animation-play-state: paused;
+}
+.vm-carousel-card {
+  animation: counter-rotate 40s linear infinite;
+}
+.vm-carousel-track:hover .vm-carousel-card {
+  animation-play-state: paused;
+}
+
+/* Fade-in + slide-up for featured cards (scroll-triggered). */
+@keyframes fade-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-slide-up {
+  opacity: 0;
+}
+.fade-slide-up.in-view {
+  animation: fade-slide-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Pulse + glow for "most viewed" badges. */
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 130, 32, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(245, 130, 32, 0);
+    transform: scale(1.06);
+  }
+}
+.pulse-glow {
+  animation: pulse-glow 1.8s ease-in-out infinite;
+}
+
+/* Infinite horizontal marquee fallback (cards scroll left, pause on hover). */
+@keyframes marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.marquee-scroll {
+  animation: marquee-scroll 50s linear infinite;
+}
+.marquee-scroll:hover {
+  animation-play-state: paused;
+}
+
+/* Reverse marquee (cards scroll right-to-left, useful in RTL contexts
+   where the natural entry direction is from the right). */
+@keyframes marquee-scroll-reverse {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.marquee-scroll-reverse {
+  animation: marquee-scroll-reverse 50s linear infinite;
+}
+.marquee-scroll-reverse:hover {
+  animation-play-state: paused;
+}
+
+/* Gentle up-down float for popular/recommendation cards. */
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+.float-soft {
+  animation: float 4s ease-in-out infinite;
+}
+.float-soft.delay-1 {
+  animation-delay: 0.6s;
+}
+.float-soft.delay-2 {
+  animation-delay: 1.2s;
+}
+.float-soft.delay-3 {
+  animation-delay: 1.8s;
+}
+
+/* Curved marquee — cards scroll horizontally along a slight arc.
+   Each card uses transform: translateY based on its position via
+   inline CSS variable. The track itself translates left infinitely. */
+@keyframes curve-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.curve-scroll {
+  animation: curve-scroll 60s linear infinite;
+}
+.curve-scroll:hover {
+  animation-play-state: paused;
+}
+
+/* Utilities */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ===================== Logo Animation (10s cycle) ===================== */
+/* Logo: fade+scale in (0-5%), hold (5-85%), fade+scale out (85-100%) */
+@keyframes logoFadeInOut {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  5% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  85% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+/* Text: hidden until 10%, slide in (10-17%), hold (17-85%), slide out (85-100%) */
+@keyframes logoTextSlideInOut {
+  0%, 10% {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+  17% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  85% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}

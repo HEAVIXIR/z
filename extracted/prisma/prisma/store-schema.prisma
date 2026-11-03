@@ -1,0 +1,360 @@
+// MEKANIX Auto-Parts Marketplace — separate PostgreSQL DB
+// Managed by HEAVIX admin via a dedicated PrismaClient
+// (output to src/lib/generated/store-client so it does NOT clash
+//  with the main HEAVIX @prisma/client).
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/lib/generated/store-client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:/home/z/my-project/db/store.db"
+}
+
+// ---------------------------------------------------------------------------
+// ADMIN AUTH (separate from customer accounts)
+// ---------------------------------------------------------------------------
+model AdminUser {
+  id            String          @id @default(cuid())
+  username      String          @unique
+  passwordHash  String
+  name          String
+  role          String          @default("ADMIN") // SUPER_ADMIN | ADMIN | OPERATOR
+  active        Boolean         @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  payments      Payment[]       @relation("PaymentReviewer")
+  currencyRates CurrencyRate[]
+  auditLogs     AuditLog[]
+  reviewedReviews Review[]      @relation("ReviewModerator")
+}
+
+// ---------------------------------------------------------------------------
+// CUSTOMERS & MECHANICS (main app)
+// ---------------------------------------------------------------------------
+model Customer {
+  id              String    @id @default(cuid())
+  phone           String    @unique
+  name            String
+  family          String
+  nationalCode   String?
+  address         String?
+  status         String    @default("ACTIVE") // ACTIVE | BLOCKED
+  totalOrders     Int       @default(0)
+  totalSpentIrr   Float     @default(0)
+  walletBalanceIrr Float   @default(0)
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  orders          Order[]
+  payments        Payment[]
+  reviews         Review[]
+  wishlists       Wishlist[]
+  walletTxns      WalletTransaction[]
+  notifications   Notification[]
+}
+
+model Mechanic {
+  id           String    @id @default(cuid())
+  phone        String    @unique
+  name         String
+  family       String
+  shopName     String?
+  specialty    String?
+  city         String?
+  address      String?
+  rating       Float     @default(0)
+  verified     Boolean   @default(false)
+  status       String    @default("ACTIVE")
+  totalOrders  Int       @default(0)
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  orders       Order[]
+}
+
+// ---------------------------------------------------------------------------
+// CATALOG (Car models for vehicle selector, Categories, Brands, Parts)
+// ---------------------------------------------------------------------------
+model CarModel {
+  id        String   @id @default(cuid())
+  brand     String   // Toyota, Hyundai, Peugeot, Volvo, Scania...
+  model     String   // Corolla, Elantra, FH16...
+  yearFrom  Int
+  yearTo    Int
+  type      String   @default("PASSENGER") // PASSENGER | HEAVY (سواری | ماشین‌آلات سنگین)
+  createdAt DateTime @default(now())
+
+  parts     Part[]
+}
+
+model Category {
+  id          String     @id @default(cuid())
+  name        String
+  nameFa      String?
+  slug        String     @unique
+  icon        String?
+  description String?
+  parentId    String?
+  parent      Category?  @relation("CategoryParent", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryParent")
+  parts       Part[]
+  createdAt   DateTime   @default(now())
+}
+
+model Brand {
+  id        String   @id @default(cuid())
+  name      String
+  nameFa    String?
+  slug      String   @unique
+  logoUrl   String?
+  country   String?
+  active    Boolean  @default(true)
+  parts     Part[]
+  createdAt DateTime @default(now())
+}
+
+model Part {
+  id                String      @id @default(cuid())
+  name              String
+  nameFa            String?
+  sku               String      @unique
+  categoryId        String
+  category          Category    @relation(fields: [categoryId], references: [id])
+  brandId           String?
+  brand             Brand?      @relation(fields: [brandId], references: [id])
+  description       String?
+  priceUsd          Float
+  oldPriceUsd       Float?      // for showing discounts
+  // contactForPrice: when true, the part has no public price — the store
+  // shows "تماس بگیرید" instead. Set by the AI parts scraper when the
+  // source site has no price, or manually by the admin.
+  contactForPrice   Boolean     @default(false)
+  stock             Int         @default(0)
+  lowStockThreshold Int         @default(5)
+  images            String      @default("[]")
+  compatibleCars    String      @default("[]")
+  carModels         CarModel[]  // structured vehicle compatibility
+  // sourceUrl: original web URL the part was scraped from (AI scraper only).
+  sourceUrl         String?
+  active            Boolean     @default(true)
+  featured          Boolean     @default(false)
+  views             Int         @default(0)
+  soldCount         Int         @default(0)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  orderItems        OrderItem[]
+  reviews           Review[]
+  wishlists         Wishlist[]
+}
+
+// ---------------------------------------------------------------------------
+// ORDERS & PAYMENTS
+// ---------------------------------------------------------------------------
+model Order {
+  id                  String      @id @default(cuid())
+  orderNumber         String      @unique
+  customerId          String
+  customer            Customer    @relation(fields: [customerId], references: [id])
+  // Optional link to the HEAVIX User (main DB) who placed this order.
+  // Kept optional for backwards compat with phone-only orders placed
+  // before the HEAVIX user integration. When present, the user can
+  // view this order from their HEAVIX dashboard without entering a
+  // phone number.
+  userId              String?
+  mechanicId          String?
+  mechanic            Mechanic?   @relation(fields: [mechanicId], references: [id])
+  status              String      @default("PENDING")
+  subtotalUsd         Float
+  shippingUsd         Float       @default(0)
+  discountIrr         Float       @default(0)
+  totalUsd            Float
+  totalIrr            Float
+  currencyRateAtOrder Float
+  marginPercentAtOrder Float
+  couponCode          String?
+  shippingAddress     String?
+  notes               String?
+  paymentStatus       String      @default("UNPAID")
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  items               OrderItem[]
+  payments            Payment[]
+  shipment            Shipment?
+}
+
+model OrderItem {
+  id               String  @id @default(cuid())
+  orderId          String
+  order            Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  partId           String
+  part             Part    @relation(fields: [partId], references: [id])
+  partNameSnapshot String
+  quantity          Int
+  unitPriceUsd      Float
+  unitPriceIrr      Float
+  lineTotalUsd      Float
+  lineTotalIrr      Float
+}
+
+model Payment {
+  id             String     @id @default(cuid())
+  orderId        String
+  order          Order      @relation(fields: [orderId], references: [id])
+  customerId     String
+  customer       Customer   @relation(fields: [customerId], references: [id])
+  amountIrr      Float
+  amountUsd      Float
+  method         String     @default("CARD") // CARD | WALLET | CASH | GATEWAY
+  status         String     @default("PENDING") // PENDING | APPROVED | REJECTED | REFUNDED
+  receiptImageUrl String?
+  referenceCode  String?
+  payerName      String?
+  payerCard      String?
+  note           String?
+  // Gateway (Zarinpal) fields
+  gateway        String?    // ZARINPAL | MOCK | null
+  authority      String?    // Zarinpal authority code
+  refId          String?    // Zarinpal reference id after verify
+  gatewayUrl    String?    // redirect URL
+  reviewedById   String?
+  reviewedBy     AdminUser? @relation("PaymentReviewer", fields: [reviewedById], references: [id])
+  reviewedAt     DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+}
+
+model Shipment {
+  id           String    @id @default(cuid())
+  orderId      String    @unique
+  order        Order     @relation(fields: [orderId], references: [id])
+  carrier      String    // پست | تیپاکس | چاپار
+  trackingCode  String?
+  status        String    @default("PENDING") // PENDING | DISPATCHED | IN_TRANSIT | DELIVERED
+  shippedAt     DateTime?
+  deliveredAt   DateTime?
+  note          String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// CURRENCY (USD -> IRR) with REAL Telegram channel auto-fetch
+// ---------------------------------------------------------------------------
+model CurrencyRate {
+  id            String     @id @default(cuid())
+  date          String     @unique // YYYY-MM-DD (Asia/Tehran)
+  rate          Float      // USD -> IRR (raw, before margin)
+  marginPercent Float      @default(0)
+  source        String     @default("MANUAL") // MANUAL | TELEGRAM
+  note          String?
+  setById       String?
+  setBy         AdminUser? @relation(fields: [setById], references: [id])
+  createdAt     DateTime   @default(now())
+}
+
+model CurrencySetting {
+  id                String    @id @default("singleton")
+  defaultRate       Float     @default(230000)
+  marginPercent     Float     @default(3)
+  autoUpdateEnabled Boolean   @default(true) // auto-fetch from Telegram ON by default
+  autoSource        String    @default("telegram")
+  lastAutoRate      Float?
+  lastAutoStatus    String?   // معامله | خرید | فروش
+  lastAutoFetchAt   DateTime?
+  updatedAt         DateTime   @updatedAt
+}
+
+model Setting {
+  id        String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// REVIEWS, WISHLIST, COUPONS, WALLET, NOTIFICATIONS
+// ---------------------------------------------------------------------------
+model Review {
+  id          String    @id @default(cuid())
+  partId      String
+  part        Part      @relation(fields: [partId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer  @relation(fields: [customerId], references: [id])
+  rating      Int       // 1-5
+  title       String?
+  comment     String?
+  approved    Boolean   @default(false)
+  reviewedById String?
+  reviewedBy  AdminUser? @relation("ReviewModerator", fields: [reviewedById], references: [id])
+  createdAt   DateTime  @default(now())
+}
+
+model Wishlist {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+  partId      String
+  part        Part     @relation(fields: [partId], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@unique([customerId, partId])
+}
+
+model Coupon {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  type        String    // PERCENT | FIXED
+  value       Float     // percent or IRR amount
+  expiresAt   DateTime?
+  usageLimit  Int       @default(0) // 0 = unlimited
+  usedCount   Int       @default(0)
+  active      Boolean   @default(true)
+  minOrderIrr Float     @default(0)
+  createdAt   DateTime  @default(now())
+}
+
+model WalletTransaction {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+  amount      Float    // + credit, - debit
+  type        String   // CREDIT | DEBIT | ORDER | DEPOSIT
+  description String?
+  createdAt   DateTime @default(now())
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+  type        String   // ORDER | PAYMENT | STOCK | SYSTEM
+  title       String
+  message     String
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// AUDIT LOG
+// ---------------------------------------------------------------------------
+model AuditLog {
+  id        String    @id @default(cuid())
+  adminId   String?
+  admin     AdminUser? @relation(fields: [adminId], references: [id])
+  adminName String
+  action    String
+  entity    String
+  entityId  String?
+  before    String?
+  after     String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+}

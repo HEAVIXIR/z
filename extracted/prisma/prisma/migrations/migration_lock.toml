@@ -1,0 +1,11 @@
+# Prisma migration lock
+#
+# Locks the database provider for the migration history.
+# Today: sqlite (dev/preview only).
+# Production target: postgresql — see docs/ADR-001-database-strategy.md.
+#
+# When the SQLite → PostgreSQL cutover happens, this file is
+# replaced with `provider = "postgresql"` and a fresh baseline is
+# taken if the migration history diverges from the new dialect.
+
+provider = "sqlite"
